@@ -1,14 +1,10 @@
-import { readFile } from "fs/promises";
-import ApplicationConfiguration from "./config";
-import {
-  createUser,
-  disableUser,
-  getApiInstanceForUser,
-  listUsers,
-} from "./apiHelper";
-import * as fs from "fs";
-import { extract, pack } from "tar-fs";
-import axios from "axios";
+import axios from 'axios';
+import * as fs from 'fs';
+import { readFile } from 'fs/promises';
+import { extract, pack } from 'tar-fs';
+
+import { createUser, disableUser, getApiInstanceForUser, listUsers } from './apiHelper';
+import ApplicationConfiguration from './config';
 
 const TEMP_WALLET_FILE_NAME = "wallet.gz";
 const ARCHIVE_SUFFIX = ".gz"; //this is funny, backup has a gz suffix but is a tar ...
@@ -16,12 +12,7 @@ const ARCHIVE_SUFFIX = ".gz"; //this is funny, backup has a gz suffix but is a t
 export const configureDestinationChain = async (): Promise<void> => {
   await extractWallet(ApplicationConfiguration.BACKUP_FILE_LOCATION);
 
-  //TODO: this is hacky ...
-  const absPath = ApplicationConfiguration.BACKUP_FILE_LOCATION.substring(
-    0,
-    ApplicationConfiguration.BACKUP_FILE_LOCATION.lastIndexOf("/")
-  );
-  const file = await readFile(`${absPath}/${TEMP_WALLET_FILE_NAME}`);
+  const file = await readFile(`./${TEMP_WALLET_FILE_NAME}`);
   const config = {
     headers: { "content-type": "application/gzip" },
     maxContentLength: 1074790400,
@@ -50,6 +41,10 @@ const extractWallet = async (path: string) => {
     stream.on("finish", async () => {
       pack(outDir, {
         entries: ["params.dat", "params.dat.bak", "wallet.dat", "wallet"], // only the specific entries will be packed
+        ignore: function (name) {
+          console.log("NAME", name);
+          return name.includes("uncsend"); // ignore .bin files when packing
+        },
       })
         .pipe(fs.createWriteStream(`./${TEMP_WALLET_FILE_NAME}`))
         .on("finish", () => {

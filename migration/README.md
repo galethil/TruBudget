@@ -2,7 +2,7 @@
 
 ### Migrate an existing TruBudget instance to a new instance
 
-1. Create a backup of your old TruBudget instance. Make sure the source instance uses version 1.30.1
+1. Create a backup of your old TruBudget instance. Make sure the source instance uses version 1.30.0
 2. Download the latest TruBudget release (2.x), this instance will be the destination instance.
 3. With the release of TruBudget 2.0, some environment variables changed. Make sure to adapt the `.env` file on the
    destination instance to your need. If you are not already using the operation script now it's a great chance to start
