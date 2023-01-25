@@ -1,14 +1,13 @@
 import axios, { AxiosInstance, AxiosResponse } from "axios";
 
 import ApplicationConfiguration from "./config";
+import { UploadedDocument } from "../customMigration/migrateDocuments";
 
 export interface UploadMetadata {
   projectId: string;
   subprojectId: string;
   workflowitemId: string;
-  fileMetadata: {
-    document: { id: string; base64: string; fileName: string };
-  };
+  documents: UploadedDocument[];
 }
 
 export interface WorkflowItemDetails {
@@ -126,7 +125,7 @@ export const uploadViaApi = async (
   api: AxiosInstance,
   metadata: UploadMetadata
 ) => {
-  const { projectId, subprojectId, workflowitemId, fileMetadata } = metadata;
+  const { projectId, subprojectId, workflowitemId, documents } = metadata;
 
   const request = await api.post("/workflowitem.update", {
     apiVersion: "1.0",
@@ -134,12 +133,12 @@ export const uploadViaApi = async (
       projectId,
       subprojectId,
       workflowitemId,
-      documents: [fileMetadata.document],
+      documents,
     },
   });
   if (request.status !== 200) {
     throw new Error(
-      `Error while performing upload to destination for file ${fileMetadata.document.fileName} to destination`
+      `Error while performing upload to destination for files ${documents} to destination`
     );
   }
 };

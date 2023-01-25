@@ -1,10 +1,9 @@
-import { documentUploader } from './customMigration/migrateDocuments';
-import { makeProjectUploader } from './customMigration/migrateWorkflowitems';
-import ApplicationConfiguration from './helper/config';
-import { disableMigrationUser } from './helper/configureDestination';
-import { getAllStreams } from './helper/migrationHelper';
-import { CustomMigrations, migrate } from './migrate';
-import { StreamInfo } from './types/stream';
+import { makeProjectUploader } from "./customMigration/migrateWorkflowitems";
+import ApplicationConfiguration from "./helper/config";
+import { disableMigrationUser } from "./helper/configureDestination";
+import { getAllStreams } from "./helper/migrationHelper";
+import { CustomMigrations, migrate } from "./migrate";
+import { StreamInfo } from "./types/stream";
 
 let migrationSource = require("multichain-node")({
   port: ApplicationConfiguration.SOURCE_RPC_PORT,
@@ -21,7 +20,6 @@ let migrationDestination = require("multichain-node")({
 });
 
 const customMigrationFunctions: CustomMigrations = {};
-customMigrationFunctions["offchain_documents"] = documentUploader;
 
 (async function () {
   try {

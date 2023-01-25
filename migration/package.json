@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon",
     "start": "node ./dist/index.js",
-    "build": "tsc --outDir ./dist ./src/index.ts",
+    "build": "rimraf dist && tsc",
     "audit": "better-npm-audit audit"
   },
   "author": "Martin Mayr",

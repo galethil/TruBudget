@@ -1,7 +1,11 @@
-import { AssertParams, assertStreamItem } from './assert';
-import { getAllStreamItems, getAllStreams, getFromTxOutData } from './helper/migrationHelper';
-import { createStream, createStreamItem, listStreams } from './rpc';
-import { Item } from './types/item';
+import { AssertParams, assertStreamItem } from "./assert";
+import {
+  getAllStreamItems,
+  getAllStreams,
+  getFromTxOutData,
+} from "./helper/migrationHelper";
+import { createStream, createStreamItem, listStreams } from "./rpc";
+import { Item } from "./types/item";
 
 export interface MoveFunction {
   sourceChain: any;

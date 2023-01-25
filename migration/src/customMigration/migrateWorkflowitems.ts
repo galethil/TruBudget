@@ -8,32 +8,34 @@ import {
   VerifyParams,
 } from "../migrate";
 import { createStreamItem } from "../rpc";
-import { DataJSON } from "../types/item";
+import { DataJSON, Item } from "../types/item";
+import { handleEventWithDocuments } from "./migrateDocuments";
 
-interface updatedJSON extends DataJSON {
+export interface updatedEvent extends DataJSON {
   update: {
     documents: [];
   };
 }
 
-interface createdJSON extends DataJSON {
+export interface createdEvent extends DataJSON {
   workflowitem: {
     documents: [];
   };
 }
+
 export const makeProjectUploader = (projectId: string): MigrateFunction => {
   return {
     stream: projectId,
     function: async (params: MoveFunction): Promise<MigrationCompleted> => {
-      const { sourceChain, destinationChain, item, stream, documentUploader } =
-        params;
+      const { sourceChain, destinationChain, item, stream } = params;
 
       try {
+        // Prepare readable item
         if (!item.available)
           return {
             status: MigrationStatus.Failed,
           };
-        let itemToMigrate = item;
+        let itemToMigrate: Item = item;
         const txId = item.txid;
         let status = MigrationStatus.Ok;
 
@@ -44,52 +46,41 @@ export const makeProjectUploader = (projectId: string): MigrateFunction => {
         ) {
           itemToMigrate = await getFromTxOutData(sourceChain, item);
         }
-        if (
-          itemToMigrate.data.json.type === "workflowitem_updated" &&
-          (itemToMigrate.data.json as unknown as updatedJSON).update
-            .documents && // here
-          (itemToMigrate.data.json as unknown as updatedJSON).update.documents
-            .length
-        ) {
-          // read document from source
-          // update workflowitem with document
-          //documentMigrateFunction?.function
-          //give documement id / ids and the workflowitem update item.
-          //the function downloads the document from the source chain and sends
-          //a /workflowitem.update request via api to destination chain
 
-          documentUploader.function({ sourceChain, item: itemToMigrate });
+        // Way to migrate workflowitem_updated or workflowitem_created item
+        const isWorkflowitemUpdatedEvent: boolean =
+          itemToMigrate.data.json.type === "workflowitem_updated";
+        const isWorkflowitemCreatedEvent: boolean =
+          itemToMigrate.data.json.type === "workflowitem_created";
+        const hasDocumentsUpdate: boolean =
+          (itemToMigrate.data.json as updatedEvent).update?.documents?.length >
+          0;
+        const hasDocumentsAttached: boolean =
+          (itemToMigrate.data.json as createdEvent).workflowitem?.documents
+            ?.length > 0;
 
-          status = MigrationStatus.Ok;
-          // itemToMigrate = {
-          //   ...itemToMigrate,
-          //   data: { ...itemToMigrate.data, json: newJson as DataJSON },
-          // };
-          return {
-            status,
-          };
-        } else if (
-          itemToMigrate.data.json.type === "workflowitem_created" &&
-          (itemToMigrate.data.json as unknown as createdJSON).workflowitem
-            .documents &&
-          (itemToMigrate.data.json as unknown as createdJSON).workflowitem
-            .documents.length
-        ) {
-          // const newJson = itemToMigrate.data.json as unknown as createdJSON;
-          // newJson.workflowitem.documents = [];
+        if (isWorkflowitemCreatedEvent && hasDocumentsAttached) {
+          await handleEventWithDocuments(
+            sourceChain,
+            destinationChain, //destinationApi axios instance
+            stream,
+            itemToMigrate
+          );
 
-          //migrate docs here too
-
-          documentUploader.function({ sourceChain, item: itemToMigrate });
-
-          status = MigrationStatus.Ok;
-
-          // status = MigrationStatus.Skipped;
-          // itemToMigrate = {
-          //   ...itemToMigrate,
-          //   data: { ...itemToMigrate.data, json: newJson as DataJSON },
-          // };
+          return { status: MigrationStatus.Ok };
         }
+        if (isWorkflowitemUpdatedEvent && hasDocumentsUpdate) {
+          await handleEventWithDocuments(
+            sourceChain,
+            destinationChain, //destinationApi axios instance
+            stream,
+            itemToMigrate
+          );
+
+          return { status: MigrationStatus.Ok };
+        }
+
+        // Default way to migrate item
         const req = await createStreamItem(
           destinationChain,
           stream,
