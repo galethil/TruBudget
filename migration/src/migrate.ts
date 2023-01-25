@@ -1,17 +1,14 @@
-import { AssertParams, assertStreamItem } from "./assert";
-import {
-  getAllStreamItems,
-  getAllStreams,
-  getFromTxOutData,
-} from "./helper/migrationHelper";
-import { createStream, createStreamItem, listStreams } from "./rpc";
-import { Item } from "./types/item";
+import { AssertParams, assertStreamItem } from './assert';
+import { getAllStreamItems, getAllStreams, getFromTxOutData } from './helper/migrationHelper';
+import { createStream, createStreamItem, listStreams } from './rpc';
+import { Item } from './types/item';
 
 export interface MoveFunction {
   sourceChain: any;
-  destinationChain: any;
-  stream: string;
+  destinationChain?: any;
+  stream?: string;
   item: Item;
+  documentUploader?: MigrateFunction;
 }
 
 export interface MigrationCompleted {
@@ -73,7 +70,8 @@ const migrateStream = async (
   sourceChain: any,
   destinationChain: any,
   stream: string,
-  mover?: MigrateFunction
+  mover?: MigrateFunction,
+  documentUploader?: MigrateFunction
 ): Promise<MigrationCompleted[] | undefined> => {
   const allItemsOnChain = await getAllStreamItems(sourceChain, stream);
 
@@ -120,6 +118,7 @@ const migrateStream = async (
           destinationChain,
           stream,
           item,
+          documentUploader,
         });
         if (!(req.status === MigrationStatus.Ok)) {
           console.warn(
@@ -160,10 +159,14 @@ export const migrate = async (
     const streamsOnSourceChain = await getAllStreams(sourceChain);
     if (!streamsOnSourceChain) throw Error("No streams on source chain");
 
-    // filter out streams
-    const streamsOfInterest = streamsOnSourceChain.filter(
-      (stream) => !streamBlacklist.includes(stream.name)
-    );
+    //filter out streams
+    const streamsOfInterest = streamsOnSourceChain
+      .filter((stream) => !streamBlacklist.includes(stream.name))
+      .sort((a, b) => {
+        if (a.name === "offchain_documents") return 1;
+        if (b.name === "offchain_documents") return -1;
+        return 0;
+      });
 
     for (const stream of streamsOfInterest) {
       const customMigration = customMigrations[stream.name];
@@ -178,7 +181,8 @@ export const migrate = async (
         sourceChain,
         destinationChain,
         stream.name,
-        customMigration
+        customMigration,
+        customMigrations["offchain_documents"]
       );
       if (!migratedStream)
         throw new Error(`Can not migrate stream! ${JSON.stringify(stream)}`);

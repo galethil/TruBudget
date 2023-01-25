@@ -1,25 +1,26 @@
-import mapLimit from "async/mapLimit";
-import * as crypto from "crypto";
+import mapLimit from 'async/mapLimit';
+import * as crypto from 'crypto';
+
 import {
   downloadFileFromApi,
+  downloadFileFromStorageService,
   getApiInstanceForUser,
   getWorkflowItemDetails,
   grantAllPermissionsOnWorkflowItem,
   uploadViaApi,
   WorkflowItemDetailsDocument,
-} from "../helper/apiHelper";
+} from '../helper/apiHelper';
+import ApplicationConfiguration from '../helper/config';
 import {
-  extractFileContentFromDocumentsOnChain,
+  decrypt,
+  decryptWithKey,
+  extractFileContentFromDocumentsOnChain as extractFileContentFromDocumentOnChain,
   getStreamItemByTx,
-} from "../helper/migrationHelper";
-import {
-  MigrateFunction,
-  MigrationCompleted,
-  MigrationStatus,
-  MoveFunction,
-  VerifyParams,
-} from "../migrate";
-import ApplicationConfiguration from "../helper/config";
+  getStreamKeyItems,
+  OnchainDocument,
+} from '../helper/migrationHelper';
+import { MigrateFunction, MigrationCompleted, MigrationStatus, MoveFunction, VerifyParams } from '../migrate';
+import { SecretPublishedEvent } from '../types/item';
 
 const MAX_ASYNC_OPERATIONS = 3;
 
@@ -35,72 +36,159 @@ export const documentUploader: MigrateFunction = {
   stream: "offchain_documents",
   function: async (params: MoveFunction): Promise<MigrationCompleted> => {
     const { sourceChain, item } = params;
-    try {
-      if (!item.available)
-        return {
-          status: MigrationStatus.Failed,
-        };
-      const document = await extractFileContentFromDocumentsOnChain(
+    const workflowItemEvent = item.data.json;
+    // const workflowItemEvent = iteml
+
+    const documents = workflowItemEvent.update
+      ? workflowItemEvent.update.documents
+      : workflowItemEvent.workflowitem.documents;
+
+    const eventContent = workflowItemEvent.update
+      ? workflowItemEvent.update
+      : workflowItemEvent.workflowitem;
+    const eventType = workflowItemEvent.type; // workflowitem_updated or workflowitem_created - used to know where to send request
+    const workflowitemEventData = {
+      apiVersion: "1.0",
+      data: {
+        ...eventContent,
+        documents: [],
+        additionalData: {},
+      },
+    };
+
+    const privKeyEncryped: string = await getStreamKeyItems(
+      sourceChain,
+      `org:${ApplicationConfiguration.ORGANIZATION}`,
+      "privateKey"
+    )[0].data.json.privateKey;
+
+    const privKey = decrypt(
+      ApplicationConfiguration.ORGANIZATION_VAULT_SECRET,
+      privKeyEncryped
+    );
+
+    for (const document of documents) {
+      const items = await getStreamKeyItems(
         sourceChain,
-        item
+        "offchain_documents",
+        document
       );
-      if (!document || document.eventType !== "workflowitem_document_uploaded")
-        return {
-          status: MigrationStatus.Failed,
-        };
+      for (const item of items) {
+        if (!item.available)
+          return {
+            status: MigrationStatus.Failed,
+          };
 
-      //TODO: what do we do with storage_service_url_published events?
-      const { projectId, subprojectId, workflowitemId, fileMetadata } =
-        document;
+        const isOldDocumentStreamItem =
+          (item.data &&
+            item.data.hasOwnProperty("vout") &&
+            item.data.hasOwnProperty("txid")) ||
+          item.data.json.type === "workflowitem_document_uploaded";
 
-      const migrationUserApi = await getApiInstanceForUser(
-        ApplicationConfiguration.MIGRATION_USER_USERNAME,
-        ApplicationConfiguration.MIGRATION_USER_PASSWORD
-      );
+        const isNewDocumentStreamItem =
+          item.data.json.type === "document_uploaded";
 
-      const rootUserApi = await getApiInstanceForUser(
-        "root",
-        ApplicationConfiguration.ROOT_SECRET
-      );
+        try {
+          // old doc workflowitem_document_uploaded - get document
+          if (isOldDocumentStreamItem) {
+            const document: OnchainDocument =
+              await extractFileContentFromDocumentOnChain(sourceChain, item);
+            workflowitemEventData.data.documents.push({
+              id: document.fileMetadata.id,
+              fileName: document.fileMetadata.fileName,
+              base64: document.fileMetadata.base64,
+            });
+            if (!document)
+              return {
+                status: MigrationStatus.Failed,
+              };
+          }
 
-      await grantAllPermissionsOnWorkflowItem(
-        rootUserApi,
-        ApplicationConfiguration.MIGRATION_USER_USERNAME,
-        projectId,
-        subprojectId,
-        workflowitemId
-      );
-      /*await grantAllRightsToUser(
+          // new doc - download document from old api
+          if (isNewDocumentStreamItem) {
+            const secretPublishedItem = items.find((item) => {
+              return (
+                item.data.json.type === "secret_published" &&
+                (item.data.json as SecretPublishedEvent).organization ===
+                  ApplicationConfiguration.ORGANIZATION
+              );
+            });
+            const encryptedSecret = (
+              secretPublishedItem.data.json as SecretPublishedEvent
+            ).encryptedSecret;
+            const decryptedSecret = decryptWithKey(encryptedSecret, privKey);
+
+            const base64Document = await downloadFileFromStorageService(
+              ApplicationConfiguration.SOUCE_STORAGE_SERVICE_URL,
+              document.id,
+              decryptedSecret
+            );
+
+            workflowitemEventData.data.documents.push({
+              id: document.id,
+              fileName: document.fileName,
+              base64: base64Document,
+            });
+            // send request to api with uploaded file
+          }
+
+          // upload document in workflowitem_updated/created event via api
+
+          //TODO: what do we do with storage_service_url_published events?
+          const { projectId, subprojectId, workflowitemId, fileMetadata } =
+            document;
+
+          const migrationUserApi = await getApiInstanceForUser(
+            ApplicationConfiguration.MIGRATION_USER_USERNAME,
+            ApplicationConfiguration.MIGRATION_USER_PASSWORD
+          );
+
+          const rootUserApi = await getApiInstanceForUser(
+            "root",
+            ApplicationConfiguration.ROOT_SECRET
+          );
+
+          await grantAllPermissionsOnWorkflowItem(
+            rootUserApi,
+            ApplicationConfiguration.MIGRATION_USER_USERNAME,
+            projectId,
+            subprojectId,
+            workflowitemId
+          );
+          /*await grantAllRightsToUser(
                     rootUserApi,
                     ApplicationConfiguration.MIGRATION_USER_USERNAME
                   );*/
-      await uploadViaApi(migrationUserApi, {
-        projectId,
-        subprojectId,
-        workflowitemId,
-        fileMetadata: {
-          document: {
-            ...fileMetadata,
-          },
-        },
-      });
+          await uploadViaApi(migrationUserApi, {
+            projectId,
+            subprojectId,
+            workflowitemId,
+            fileMetadata: {
+              document: {
+                ...fileMetadata,
+              },
+            },
+          });
 
-      //There is no need to save changes on destination chain since API is processing request.
+          //There is no need to save changes on destination chain since API is processing request.
 
-      return {
-        sourceChainTx: item.txid,
-        destinationChainTx: "Uploaded via API.",
-        status: MigrationStatus.Ok,
-        additionalData: {
-          projectId,
-          subprojectId,
-          workflowitemId,
-        },
-      };
-    } catch (error) {
-      throw Error(
-        `Error while uploading file ${params.item.txid} via API with ${error.message}`
-      );
+          return {
+            sourceChainTx: item.txid,
+            destinationChainTx: "Uploaded via API.",
+            status: MigrationStatus.Ok,
+            additionalData: {
+              projectId,
+              subprojectId,
+              workflowitemId,
+            },
+          };
+        } catch (error) {
+          console.error(error);
+          throw Error(
+            `Error while uploading file ${params.item.txid} via API with ${error.message}`
+          );
+        }
+      }
     }
   },
   verifier: async (params: VerifyParams): Promise<boolean> => {
@@ -110,7 +198,7 @@ export const documentUploader: MigrateFunction = {
       stream,
       sourceChainTx
     );
-    const documentOnSourceChain = await extractFileContentFromDocumentsOnChain(
+    const documentOnSourceChain = await extractFileContentFromDocumentOnChain(
       sourceChain,
       sourceItem
     );

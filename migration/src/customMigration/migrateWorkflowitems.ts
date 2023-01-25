@@ -9,6 +9,7 @@ import {
 } from "../migrate";
 import { createStreamItem } from "../rpc";
 import { DataJSON } from "../types/item";
+
 interface updatedJSON extends DataJSON {
   update: {
     documents: [];
@@ -24,7 +25,8 @@ export const makeProjectUploader = (projectId: string): MigrateFunction => {
   return {
     stream: projectId,
     function: async (params: MoveFunction): Promise<MigrationCompleted> => {
-      const { sourceChain, destinationChain, item, stream } = params;
+      const { sourceChain, destinationChain, item, stream, documentUploader } =
+        params;
 
       try {
         if (!item.available)
@@ -45,16 +47,26 @@ export const makeProjectUploader = (projectId: string): MigrateFunction => {
         if (
           itemToMigrate.data.json.type === "workflowitem_updated" &&
           (itemToMigrate.data.json as unknown as updatedJSON).update
-            .documents &&
+            .documents && // here
           (itemToMigrate.data.json as unknown as updatedJSON).update.documents
             .length
         ) {
-          const newJson = itemToMigrate.data.json as unknown as updatedJSON;
-          newJson.update.documents = [];
-          status = MigrationStatus.Skipped;
-          itemToMigrate = {
-            ...itemToMigrate,
-            data: { ...itemToMigrate.data, json: newJson as DataJSON },
+          // read document from source
+          // update workflowitem with document
+          //documentMigrateFunction?.function
+          //give documement id / ids and the workflowitem update item.
+          //the function downloads the document from the source chain and sends
+          //a /workflowitem.update request via api to destination chain
+
+          documentUploader.function({ sourceChain, item: itemToMigrate });
+
+          status = MigrationStatus.Ok;
+          // itemToMigrate = {
+          //   ...itemToMigrate,
+          //   data: { ...itemToMigrate.data, json: newJson as DataJSON },
+          // };
+          return {
+            status,
           };
         } else if (
           itemToMigrate.data.json.type === "workflowitem_created" &&
@@ -63,13 +75,20 @@ export const makeProjectUploader = (projectId: string): MigrateFunction => {
           (itemToMigrate.data.json as unknown as createdJSON).workflowitem
             .documents.length
         ) {
-          const newJson = itemToMigrate.data.json as unknown as createdJSON;
-          newJson.workflowitem.documents = [];
-          status = MigrationStatus.Skipped;
-          itemToMigrate = {
-            ...itemToMigrate,
-            data: { ...itemToMigrate.data, json: newJson as DataJSON },
-          };
+          // const newJson = itemToMigrate.data.json as unknown as createdJSON;
+          // newJson.workflowitem.documents = [];
+
+          //migrate docs here too
+
+          documentUploader.function({ sourceChain, item: itemToMigrate });
+
+          status = MigrationStatus.Ok;
+
+          // status = MigrationStatus.Skipped;
+          // itemToMigrate = {
+          //   ...itemToMigrate,
+          //   data: { ...itemToMigrate.data, json: newJson as DataJSON },
+          // };
         }
         const req = await createStreamItem(
           destinationChain,
@@ -88,10 +107,15 @@ export const makeProjectUploader = (projectId: string): MigrateFunction => {
           status,
         };
       } catch (error) {
-        console.log(error);
-        throw Error(
-          `Error while uploading file ${params.item.txid} via API with ${error.message}`
+        console.error(
+          `Error while migrating item with txid ${params.item.txid} with ${error.message}. 
+          The item will be skipped. Please check if ignoring this event is safe and does not lead to invalid data.`,
+          params.item,
+          error
         );
+        return {
+          status: MigrationStatus.Skipped,
+        };
       }
     },
     verifier: async (params: VerifyParams): Promise<boolean> => {
