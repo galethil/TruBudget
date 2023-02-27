@@ -1,6 +1,7 @@
-import fs from "fs";
+import * as fs from "fs";
 
 import { organizationStreamName } from "../../api/src/organization/streamNames";
+import { fixMetadata } from "./fixMetadata";
 import * as AsymetricCrypto from "./helper/asymmetricCrypto";
 import ApplicationConfiguration from "./helper/config";
 import { getStreamKeyItems } from "./helper/rpcHelper";
@@ -18,25 +19,30 @@ let sourceChain = require("multichain-node")({
 
 (async function () {
   try {
-    //load json from docsWithoutSecret.json file
     const docsToFix: string[] = JSON.parse(
       fs.readFileSync("docsToFix.json", "utf-8")
     );
-    //console.log(docsToFix);
-    // docsToFix.forEach(async (doc) => {
-    //   const secret = getSecret()
-    //   //const
-    // }); //todo do this for all docs
+    const documentsWithProblems = [];
 
-    const encryptedSecret = (await getSecretPublishedEvent(docsToFix[0]))
-      .encryptedSecret;
-    const privKey = await getPrivKey();
-    const decryptedSecret = AsymetricCrypto.decryptWithKey(
-      encryptedSecret,
-      privKey
-    );
-    console.log(decryptedSecret);
-    //todo save decrypted secret to file metadata on minio
+    for (const docId of docsToFix) {
+      const { encryptedSecret, fileName } = await getFileInfo(docId);
+
+      if (!encryptedSecret && !fileName) {
+        console.log(`Document is not uploaded correctly ${docId}`);
+        documentsWithProblems.push(docId);
+        continue;
+      }
+
+      const privKey = await getPrivKey();
+      const decryptedSecret = AsymetricCrypto.decryptWithKey(
+        encryptedSecret,
+        privKey
+      );
+      console.log(decryptedSecret);
+      await fixMetadata(docId, fileName, decryptedSecret);
+    }
+    console.log("following docs could not be fixed:");
+    console.log(documentsWithProblems);
   } catch (e) {
     console.log(e);
   }
@@ -47,16 +53,17 @@ async function getDocumentEvents(documentId: string) {
   return await getStreamKeyItems(sourceChain, "offchain_documents", documentId);
 }
 
-async function getSecretPublishedEvent(
+async function getFileInfo(
   documentId: string
-): Promise<SecretPublishedEvent> {
+): Promise<{ encryptedSecret: string; fileName: string }> {
   const items: Item[] = await getDocumentEvents(documentId);
   const documentUploadedEvent = items.find(
     (e) => e.data.json.type === "document_uploaded"
   );
-  console.log(documentUploadedEvent);
+  if (!documentUploadedEvent) return { encryptedSecret: "", fileName: "" }; // this document is not saved correctly
+
   const fileName = (documentUploadedEvent.data.json as any).fileName;
-  //todo save filename to metadata too
+
   if (!documentUploadedEvent) {
     console.log(`Document is not uploaded for this documentId ${documentId}`);
   }
@@ -70,7 +77,11 @@ async function getSecretPublishedEvent(
   if (!secretPublishedEvent) {
     console.log("Secret is not published for this organization");
   }
-  return secretPublishedEvent as SecretPublishedEvent;
+  return {
+    encryptedSecret: (secretPublishedEvent as SecretPublishedEvent)
+      .encryptedSecret,
+    fileName,
+  };
 }
 
 async function getPrivKey() {
