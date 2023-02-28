@@ -1,4 +1,5 @@
 import { listStreamKeyItems } from "../rpc";
+import { DocumentUploadedEvent, SecretPublishedEvent } from "../types/events";
 import { Item } from "../types/item";
 
 export interface OnchainDocument {
@@ -24,6 +25,30 @@ const getStreamKeyItems = async (
   } catch (e) {
     console.log("error", e);
   }
+};
+
+export const createStreamItem = (
+  multichain: any,
+  stream: string,
+  key: string[],
+  event: DocumentUploadedEvent | SecretPublishedEvent
+): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    multichain.publish(
+      {
+        stream,
+        verbose: true,
+        key,
+        data: { json: event },
+      },
+      async (err: any, itmes: any) => {
+        if (err) {
+          return reject(err);
+        }
+        resolve(itmes);
+      }
+    );
+  });
 };
 
 export { getStreamKeyItems };

@@ -1,13 +1,18 @@
 import * as fs from "fs";
 
 import { organizationStreamName } from "../../api/src/organization/streamNames";
+import { fixEvents } from "./fixEvents";
 import { fixMetadata } from "./fixMetadata";
 import * as AsymetricCrypto from "./helper/asymmetricCrypto";
 import ApplicationConfiguration from "./helper/config";
 import { getStreamKeyItems } from "./helper/rpcHelper";
 import { getOrganizationStreamName } from "./helper/streamHelper";
 import * as SymmetricCrypto from "./helper/symmetricCrypto";
-import { SecretPublishedEvent } from "./types/events";
+import {
+  PublicKeyPublishedEvent,
+  SecretPublishedEvent,
+  WorkflowitemDocumentUploadedEvent,
+} from "./types/events";
 import { Item } from "./types/item";
 
 let sourceChain = require("multichain-node")({
@@ -22,31 +27,61 @@ let sourceChain = require("multichain-node")({
     const docsToFix: string[] = JSON.parse(
       fs.readFileSync("docsToFix.json", "utf-8")
     );
-    const documentsWithProblems = [];
-
-    for (const docId of docsToFix) {
-      const { encryptedSecret, fileName } = await getFileInfo(docId);
-
-      if (!encryptedSecret && !fileName) {
-        console.log(`Document is not uploaded correctly ${docId}`);
-        documentsWithProblems.push(docId);
-        continue;
-      }
-
-      const privKey = await getPrivKey();
-      const decryptedSecret = AsymetricCrypto.decryptWithKey(
-        encryptedSecret,
-        privKey
-      );
-      console.log(decryptedSecret);
-      await fixMetadata(docId, fileName, decryptedSecret);
-    }
-    console.log("following docs could not be fixed:");
-    console.log(documentsWithProblems);
+    //await fixMissingMetadata(docsToFix);
+    await fixEventsAndMetadata(docsToFix);
   } catch (e) {
     console.log(e);
   }
 })();
+
+async function fixMissingMetadata(docsToFix: string[]) {
+  const documentsWithProblems = [];
+
+  for (const docId of docsToFix) {
+    const { encryptedSecret, fileName } = await getFileInfo(docId);
+
+    if (!encryptedSecret && !fileName) {
+      console.log(`Document is not uploaded correctly ${docId}`);
+      documentsWithProblems.push(docId);
+      continue;
+    }
+
+    const privKey = await getPrivKey();
+    const decryptedSecret = AsymetricCrypto.decryptWithKey(
+      encryptedSecret,
+      privKey
+    );
+    console.log(decryptedSecret);
+    await fixMetadata(docId, fileName, decryptedSecret);
+  }
+  console.log("following docs could not be fixed:");
+  console.log(documentsWithProblems);
+}
+
+async function fixEventsAndMetadata(docsToFix: string[]) {
+  const documentsWithProblems = [];
+  // for (const docId of docsToFix) {
+  const docId = ""; //todo enter id here
+  const items: Item[] = await getDocumentEvents(docId);
+  const workflowitemDocumentUploadedEvent = items.find(
+    (e) => e.data.json.type === "workflowitem_document_uploaded"
+  );
+  if (!workflowitemDocumentUploadedEvent) {
+    console.log(`Event is not saved for this documentId ${docId}`);
+    // continue;
+  }
+  const event: WorkflowitemDocumentUploadedEvent =
+    workflowitemDocumentUploadedEvent.data
+      .json as WorkflowitemDocumentUploadedEvent;
+  console.log(event);
+
+  const publicKeyBase64 = await getPubKey();
+  await fixEvents(event, publicKeyBase64, sourceChain);
+
+  // }
+  console.log("following docs could not be fixed:");
+  console.log(documentsWithProblems);
+}
 
 async function getDocumentEvents(documentId: string) {
   //only secret published events have organization key
@@ -101,4 +136,13 @@ async function getPrivKey() {
   );
 
   return decryptedPrivkey;
+}
+
+async function getPubKey(): Promise<string> {
+  const publicKeyItem = await getStreamKeyItems(
+    sourceChain,
+    "public_keys",
+    ApplicationConfiguration.ORGANIZATION
+  );
+  return (publicKeyItem[0].data.json as PublicKeyPublishedEvent).publicKey;
 }
