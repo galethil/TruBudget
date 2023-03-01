@@ -148,7 +148,7 @@ export async function getDocument(
     );
   }
 
-  if (!offchainDocumentEvent) {
+  if (!offchainDocumentEvent || !offchainDocumentEvent.document.base64) {
     logger.trace(`Trying to find document ${documentId} in the storage service`);
 
     // Try to get document from storage service
