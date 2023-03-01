@@ -97,19 +97,19 @@ function sourceEvent(
     if (Result.isErr(workflowitem)) {
       return new VError(workflowitem, "could not create workflowitem from event");
     }
-    const mappedDocuments: StoredDocument[] = [];
-    for (const doc of workflowitem.documents) {
-      const mappedDocument = mapOldDocToNewDoc(doc);
-      if (Result.isErr(mappedDocument)) {
-        return new VError(
-          mappedDocument,
-          "Could not map old workflowitem documents structure to new structure",
-        );
-      }
-      mappedDocuments.push(mappedDocument);
-    }
-    workflowitem.documents = mappedDocuments;
   }
+  const mappedDocuments: StoredDocument[] = [];
+  for (const doc of workflowitem.documents) {
+    const mappedDocument = mapOldDocToNewDoc(doc);
+    if (Result.isErr(mappedDocument)) {
+      return new VError(
+        mappedDocument,
+        "Could not map old workflowitem documents structure to new structure",
+      );
+    }
+    mappedDocuments.push(mappedDocument);
+  }
+  workflowitem.documents = mappedDocuments;
 
   return workflowitem;
 }
